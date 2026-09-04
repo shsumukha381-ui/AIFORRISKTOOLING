@@ -21,6 +21,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 ARTIFACTS_DIR = os.path.join(PROJECT_ROOT, "artifacts")
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from backend.responder import (
     load_model_artifacts,
     predict_fraud_probability,
@@ -39,6 +42,38 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+
+# ---------------------------------------------------------------------------
+# Authentication Setup
+# ---------------------------------------------------------------------------
+from streamlit_google_auth import Authenticate
+
+# Dynamically build the google credentials JSON file from environment variables
+google_creds = {
+    "web": {
+        "client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
+        "project_id": "fraud-detector-auth",
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
+        "redirect_uris": [os.environ.get("GOOGLE_REDIRECT_URI", "http://localhost:8501")]
+    }
+}
+creds_path = os.path.join(PROJECT_ROOT, "google_credentials.json")
+with open(creds_path, "w") as f:
+    json.dump(google_creds, f)
+
+authenticator = Authenticate(
+    secret_credentials_path=creds_path,
+    cookie_name='fraud_detector_cookie',
+    cookie_key='secure_signature_key',
+    redirect_uri=os.environ.get("GOOGLE_REDIRECT_URI", "http://localhost:8501"),
+    cookie_expiry_days=30.0
+)
+
+authenticator.check_authentification()
+
 
 # ---------------------------------------------------------------------------
 # Custom CSS — dark theme + gradient banner + styling
@@ -357,6 +392,31 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+
+# ---------------------------------------------------------------------------
+# Main Application Content (Protected)
+# ---------------------------------------------------------------------------
+if not st.session_state.get('connected'):
+    st.markdown("""
+    <div style="text-align: center; margin-top: 10vh;">
+        <h1 style="font-size: 3rem; margin-bottom: 0;">🛡️ Fraud Risk Portal</h1>
+        <p style="color: #888; margin-top: 0.5rem; margin-bottom: 2rem;">Authorized Risk Analysts Only</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        # Wrap the login button in a container to center it
+        st.markdown('<div style="display: flex; justify-content: center;">', unsafe_allow_html=True)
+        authenticator.login()
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+    st.stop()  # Stop execution until authenticated
+
+# If authenticated, show logout button in sidebar
+st.sidebar.title(f"Welcome, {st.session_state.get('user_info', {}).get('given_name', 'Analyst')}")
+if st.sidebar.button("Log Out"):
+    authenticator.logout()
 
 # ---------------------------------------------------------------------------
 # Tabs
