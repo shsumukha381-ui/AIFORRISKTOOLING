@@ -1,0 +1,9 @@
+{
+  "n_runs": 1000,
+  "p50_ms": 1.271,
+  "p95_ms": 2.581,
+  "p99_ms": 4.554,
+  "mean_ms": 1.492,
+  "max_ms": 22.839,
+  "hardware_note": "AMD64 Family 25 Model 68 Stepping 1, AuthenticAMD, Windows, Python 3.14.0, no GPU"
+}
