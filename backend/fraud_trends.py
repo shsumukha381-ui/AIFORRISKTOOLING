@@ -212,6 +212,7 @@ def save_trends(overall, per_product):
     output = {
         "n_bins": n_bins,
         "n_spikes_overall": n_spikes,
+        "window_hours": None,  # will be set by caller if known
         "overall": overall_records,
         "per_product": per_product_records,
         "spikes_summary": spike_records,
@@ -223,6 +224,32 @@ def save_trends(overall, per_product):
 
     print(f"[fraud_trends] Saved {n_bins} bins ({n_spikes} spikes) to {output_path}")
     return output
+
+
+def get_transactions_for_bin(test_df, hour_bin, window_hours=4):
+    """
+    Return the actual test-set rows whose TransactionDT falls into the
+    given hour_bin.
+
+    Parameters
+    ----------
+    test_df : DataFrame
+        The full test set (must include TransactionDT and isFraud).
+    hour_bin : int
+        The bin identifier (as stored in fraud_trends.json).
+    window_hours : int
+        Bin width in hours — must match the value used when
+        compute_fraud_trends() was called.
+
+    Returns
+    -------
+    DataFrame
+        Rows belonging to that bin, with original columns intact.
+    """
+    seconds_per_bin = 3600 * window_hours
+    df = test_df.copy()
+    df["hour_bin"] = (df["TransactionDT"] // seconds_per_bin).astype(int)
+    return df[df["hour_bin"] == hour_bin].drop(columns=["hour_bin"])
 
 
 def main():
@@ -254,7 +281,13 @@ def main():
     print(f"[fraud_trends] {len(overall)} bins total, "
           f"{n_low_vol} low-volume, {n_spikes} spikes detected")
 
-    save_trends(overall, per_product)
+    result = save_trends(overall, per_product)
+    result["window_hours"] = window_hours
+    # Re-save with window_hours populated
+    output_path = os.path.join(ARTIFACTS_DIR, "fraud_trends.json")
+    with open(output_path, "w") as f:
+        json.dump(result, f, indent=2)
+
     print("[fraud_trends] Done.")
 
 

@@ -1,6 +1,7 @@
 {
   "n_bins": 252,
   "n_spikes_overall": 18,
+  "window_hours": 4,
   "overall": [
     {
       "hour_bin": 846,

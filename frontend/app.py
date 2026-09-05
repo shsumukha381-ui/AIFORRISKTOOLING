@@ -1195,6 +1195,107 @@ with tab3:
             st.markdown("<br>", unsafe_allow_html=True)
 
             # ---------------------------------------------------------------
+            # Export underlying transactions for a spike
+            # ---------------------------------------------------------------
+            st.markdown(
+                '<p class="section-header">View Underlying Transactions</p>',
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "Select a spike bin to inspect the actual test-set transactions "
+                "behind the aggregated fraud rate — verify the numbers directly."
+            )
+
+            sorted_spikes_for_export = sorted(
+                spikes_summary, key=lambda s: -(s.get("z_score") or 0)
+            )
+            export_options = [
+                f"Bin {s['hour_bin']} — {s['fraud_rate']:.2%} fraud rate "
+                f"({s['n_fraud']} fraud / {s['n_transactions']} total)"
+                for s in sorted_spikes_for_export
+            ]
+
+            selected_export_label = st.selectbox(
+                "Select a spike bin to inspect",
+                options=export_options,
+                key="spike_export_select",
+            )
+            selected_export_idx = export_options.index(selected_export_label)
+            selected_export_spike = sorted_spikes_for_export[selected_export_idx]
+            selected_bin = selected_export_spike["hour_bin"]
+
+            if st.button("📋 Load transactions for this bin", key="load_bin_tx_btn"):
+                with st.spinner("Loading transactions…"):
+                    from backend.fraud_trends import get_transactions_for_bin
+
+                    df_test = pd.read_parquet(
+                        os.path.join(ARTIFACTS_DIR, "test.parquet")
+                    )
+                    window_hours = trends_data.get("window_hours", 4)
+                    bin_df = get_transactions_for_bin(df_test, selected_bin, window_hours)
+
+                    st.session_state["spike_bin_df"] = bin_df
+                    st.session_state["spike_bin_id"] = selected_bin
+
+            # Show previously loaded transactions (persists across reruns)
+            if "spike_bin_df" in st.session_state and st.session_state.get("spike_bin_id") == selected_bin:
+                bin_df = st.session_state["spike_bin_df"]
+
+                n_fraud = int(bin_df["isFraud"].sum())
+                n_total = len(bin_df)
+                fr = n_fraud / n_total if n_total > 0 else 0
+
+                col_a, col_b, col_c = st.columns(3)
+                with col_a:
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <div class="label">Transactions in Bin</div>
+                        <div class="value">{n_total}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with col_b:
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <div class="label">Fraud Count</div>
+                        <div class="value" style="color: #ef4444;">{n_fraud}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with col_c:
+                    st.markdown(f"""
+                    <div class="metric-card">
+                        <div class="label">Fraud Rate</div>
+                        <div class="value" style="color: #ef4444;">{fr:.2%}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # Show a readable subset of columns first, full data in expander
+                display_cols = [
+                    c for c in ["isFraud", "TransactionDT", "TransactionAmt",
+                                "ProductCD", "card1", "card4", "card6",
+                                "P_emaildomain", "addr1", "addr2", "dist1"]
+                    if c in bin_df.columns
+                ]
+                st.dataframe(
+                    bin_df[display_cols],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                with st.expander("Show all columns"):
+                    st.dataframe(bin_df, use_container_width=True, hide_index=True)
+
+                csv_bytes = bin_df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label=f"⬇ Download transactions for bin {selected_bin} as CSV",
+                    data=csv_bytes,
+                    file_name=f"transactions_bin_{selected_bin}.csv",
+                    mime="text/csv",
+                    key="download_bin_csv",
+                )
+
+            # ---------------------------------------------------------------
             # "Explain this spike" — LLM-powered explanation
             # ---------------------------------------------------------------
             st.markdown(
