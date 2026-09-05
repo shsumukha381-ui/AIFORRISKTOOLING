@@ -13,7 +13,7 @@ This project is a complete, production-styled pipeline addressing those realitie
 - **An aggregate Fraud Trends view** that detects statistical spikes in fraud rates over time, complementing the real-time per-transaction detector.
 
 ## Live Demo
-- **[LIVE DEMO LINK]** *(TODO: Insert deployed Streamlit app link here)*
+- **[LIVE DEMO LINK]**(https://aiforsisktooling.streamlit.app/)
 - **[DEMO VIDEO LINK]** *(TODO: Insert demo video link here)*
 
 ## Headline Results
