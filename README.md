@@ -14,7 +14,7 @@ This project is a complete, production-styled pipeline addressing those realitie
 
 ## Live Demo
 - **[LIVE DEMO LINK]**(https://aiforsisktooling.streamlit.app/)
-- **[DEMO VIDEO LINK]** *(TODO: Insert demo video link here)*
+- **[DEMO VIDEO LINK]**(https://drive.google.com/file/d/1pESfCszb_o1ZpAGdRwijw5xJkgATNWko/view?usp=sharing)
 
 ## Headline Results
 
