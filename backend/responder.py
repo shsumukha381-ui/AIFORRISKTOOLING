@@ -66,10 +66,17 @@ NARRATION_SYSTEM_PROMPT = (
 )
 
 
+class CustomUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if name == 'CalibratedModel':
+            from backend.train_model import CalibratedModel
+            return CalibratedModel
+        return super().find_class(module, name)
+
 def load_model_artifacts():
     """Load the trained (calibrated) XGBoost model, raw model, encoder, and feature names."""
     with open(os.path.join(ARTIFACTS_DIR, "xgb_model.pkl"), "rb") as f:
-        model = pickle.load(f)
+        model = CustomUnpickler(f).load()
     # The raw XGBoost model is accessible inside the calibrated wrapper.
     # We also keep xgb_model_raw.pkl on disk for evaluate.py's feature
     # importance loader, but for inference we just reach into the wrapper.
