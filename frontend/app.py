@@ -458,34 +458,31 @@ with tab1:
             )
         
         if st.button("🛡️ Check Risk Before Payment", key="manual_analyze", use_container_width=True):
-            # Map UI inputs to model features, using train medians for unexposed columns
-            medians = config["train_medians"]
-            feature_dict = {col: medians[col] for col in config["numeric_cols"]}
-            feature_dict.update({col: "missing" for col in config["categorical_cols"]})
+            # Map UI inputs into a raw dictionary, mimicking how CSV data looks
+            raw_dict = {}
+            raw_dict["TransactionAmt"] = transaction_amt
+            raw_dict["ProductCD"] = product_cd
+            raw_dict["D1"] = float(days_since_activity)
+            raw_dict["card1"] = float(customer_history)
+            raw_dict["card4"] = card_type
+            raw_dict["card6"] = card_class
             
-            # Override with user inputs
-            feature_dict["TransactionAmt"] = transaction_amt
-            feature_dict["ProductCD"] = product_cd
-            feature_dict["D1"] = float(days_since_activity)
-            feature_dict["card1"] = float(customer_history)
-            feature_dict["card4"] = card_type
-            feature_dict["card6"] = card_class
-            
-            # Map boolean signals
-            feature_dict["M4"] = "T" if addr_match else "F"
-            feature_dict["M5"] = "T" if email_recognized else "F"
-            feature_dict["M6"] = "T" if card_match else "F"
+            # Pass boolean values directly (preprocess_transaction handles them)
+            raw_dict["M4"] = addr_match
+            raw_dict["M5"] = email_recognized
+            raw_dict["M6"] = card_match
             
             if email_recognized:
-                feature_dict["P_emaildomain"] = "gmail.com"
+                raw_dict["P_emaildomain"] = "gmail.com"
             else:
-                feature_dict["P_emaildomain"] = "missing"
+                raw_dict["P_emaildomain"] = "missing"
             
             if distance_present:
-                feature_dict["dist1"] = 50.0
-            else:
-                feature_dict["dist1"] = medians.get("dist1", 0)
+                raw_dict["dist1"] = 50.0
                 
+            from backend.responder import preprocess_transaction
+            feature_dict = preprocess_transaction(raw_dict, config)
+            
             st.session_state.current_feature_dict = feature_dict
             st.session_state.chat_history = []
             st.session_state.tx_context = None

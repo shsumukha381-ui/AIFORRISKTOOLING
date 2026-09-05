@@ -171,7 +171,46 @@ def prepare_feature_vector(feature_dict, config, encoder):
     return X
 
 
-def predict_fraud_probability(feature_dict, model=None, raw_model=None,
+def preprocess_transaction(raw_dict, config):
+    """
+    Unified feature preprocessing function.
+    Takes a dict-like object (pandas Series or standard dict),
+    maps raw values to a model-ready feature dictionary.
+    """
+    numeric_cols = config["numeric_cols"]
+    categorical_cols = config["categorical_cols"]
+    medians = config["train_medians"]
+
+    feature_dict = {}
+    for col in numeric_cols:
+        val = raw_dict.get(col, medians.get(col, 0))
+        if isinstance(val, str):
+            vl = val.strip().lower()
+            if vl in ('t', 'true', 'y', 'yes', '1'):
+                val = 1.0
+            elif vl in ('f', 'false', 'n', 'no', '0'):
+                val = 0.0
+        try:
+            val_float = float(val)
+        except (ValueError, TypeError):
+            val_float = np.nan
+        feature_dict[col] = val_float if pd.notna(val_float) else float(medians.get(col, 0))
+
+    for col in categorical_cols:
+        val = raw_dict.get(col, "missing")
+        # Ensure booleans from UI or Pandas are properly stringified as they appear in train
+        if isinstance(val, bool):
+            val = "T" if val else "F"
+        elif isinstance(val, str):
+            vl = val.strip().lower()
+            if vl == "true": val = "T"
+            elif vl == "false": val = "F"
+        feature_dict[col] = str(val) if pd.notna(val) else "missing"
+
+    return feature_dict
+
+
+def predict_fraud_probability(raw_dict, model=None, raw_model=None,
                                encoder=None, config=None, feature_names=None):
     """
     Predict fraud probability for a single transaction.
@@ -180,6 +219,7 @@ def predict_fraud_probability(feature_dict, model=None, raw_model=None,
     if model is None:
         model, raw_model, encoder, feature_names, config, _ = load_model_artifacts()
 
+    feature_dict = preprocess_transaction(raw_dict, config)
     X = prepare_feature_vector(feature_dict, config, encoder)
     prob = model.predict_proba(X)[0, 1]
     contributions = get_feature_contributions(raw_model, X, feature_names)
@@ -198,10 +238,6 @@ def predict_fraud_probability_batch(df, model, raw_model, encoder, config,
     Feature contributions are NOT computed here (expensive per-row SHAP);
     they are generated on demand when a user selects a specific row.
     """
-    numeric_cols = config["numeric_cols"]
-    categorical_cols = config["categorical_cols"]
-    medians = config["train_medians"]
-
     above_range = 1.0 - optimal_threshold
     decline_floor = optimal_threshold + above_range * 0.7
 
@@ -210,20 +246,7 @@ def predict_fraud_probability_batch(df, model, raw_model, encoder, config,
 
     for row_idx in range(len(df)):
         row = df.iloc[row_idx]
-        # Build feature dict for this row (same logic as single-row CSV path)
-        feature_dict = {}
-        for col in numeric_cols:
-            val = row.get(col, medians.get(col, 0))
-            if isinstance(val, str):
-                vl = val.strip().lower()
-                if vl in ('t', 'true', 'y', 'yes', '1'):
-                    val = 1.0
-                elif vl in ('f', 'false', 'n', 'no', '0'):
-                    val = 0.0
-            feature_dict[col] = float(val) if pd.notna(val) else medians.get(col, 0)
-        for col in categorical_cols:
-            val = row.get(col, "missing")
-            feature_dict[col] = str(val) if pd.notna(val) else "missing"
+        feature_dict = preprocess_transaction(row, config)
 
         X = prepare_feature_vector(feature_dict, config, encoder)
         X_all_parts.append(X)
