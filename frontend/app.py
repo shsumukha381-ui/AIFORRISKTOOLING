@@ -1161,37 +1161,36 @@ with tab3:
                 unsafe_allow_html=True,
             )
 
-            spike_table_html = """
-            <table class="contrib-table">
-            <tr>
-                <th>Time Bin</th>
-                <th>Fraud Rate</th>
-                <th>Baseline</th>
-                <th>Z-Score</th>
-                <th>Transactions</th>
-                <th>Fraud Count</th>
-            </tr>
-            """
+            spike_rows = []
             for spike in sorted(spikes_summary, key=lambda s: -(s.get("z_score") or 0)):
                 fr = spike["fraud_rate"]
                 bl = spike.get("baseline_mean")
                 zs = spike.get("z_score")
-                fr_str = f"{fr:.2%}" if fr is not None else "N/A"
-                bl_str = f"{bl:.2%}" if bl is not None else "N/A"
-                zs_str = f"{zs:.2f}" if zs is not None else "N/A"
-                severity_color = "#ef4444" if (zs or 0) > 3 else "#f59e0b"
-                spike_table_html += f"""
-                <tr>
-                    <td>{spike['hour_bin']}</td>
-                    <td style="color: {severity_color}; font-weight: 600;">{fr_str}</td>
-                    <td>{bl_str}</td>
-                    <td style="color: {severity_color}; font-weight: 600;">{zs_str}</td>
-                    <td>{spike['n_transactions']}</td>
-                    <td>{spike['n_fraud']}</td>
-                </tr>
-                """
-            spike_table_html += "</table>"
-            st.markdown(spike_table_html, unsafe_allow_html=True)
+                spike_rows.append({
+                    "Time Bin": spike["hour_bin"],
+                    "Fraud Rate": f"{fr:.2%}" if fr is not None else "N/A",
+                    "Baseline": f"{bl:.2%}" if bl is not None else "N/A",
+                    "Z-Score": round(zs, 2) if zs is not None else None,
+                    "Transactions": spike["n_transactions"],
+                    "Fraud Count": spike["n_fraud"],
+                })
+
+            spikes_df = pd.DataFrame(spike_rows)
+
+            def _highlight_severity(val, col):
+                """Apply red/amber text to Fraud Rate and Z-Score cells."""
+                if col == "Z-Score" and val is not None:
+                    color = "#ef4444" if val > 3 else "#f59e0b"
+                    return f"color: {color}; font-weight: 600"
+                if col == "Fraud Rate" and val != "N/A":
+                    return "color: #ef4444; font-weight: 600"
+                return ""
+
+            styled = spikes_df.style.apply(
+                lambda s: [_highlight_severity(v, s.name) for v in s], axis=0
+            )
+
+            st.dataframe(styled, use_container_width=True, hide_index=True)
 
             st.markdown("<br>", unsafe_allow_html=True)
 
