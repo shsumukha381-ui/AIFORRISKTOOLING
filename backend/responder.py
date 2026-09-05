@@ -19,7 +19,7 @@ Key behaviors:
 
 Usage:
     from backend.responder import generate_case_note, generate_risk_narration
-    narration = generate_risk_narration(contributions, probability)
+    narration = generate_risk_narration(contributions, probability, optimal_threshold, risk_tier)
     note = generate_case_note(feature_dict, fraud_probability, optimal_threshold)
 """
 
@@ -76,10 +76,14 @@ SYSTEM_PROMPT = """You are a fraud-risk case-note assistant. You will be given a
 
 # System prompt for always-on risk narration (lightweight, runs for every transaction)
 NARRATION_SYSTEM_PROMPT = (
-    "You write one short, plain-language sentence explaining why a transaction's "
-    "fraud risk score is what it is, based on the given signals. Do not recommend "
-    "actions here — that is handled separately. Do not suggest how to alter a "
-    "transaction to change its score. Be factual and neutral, not alarmist."
+    "You write one short, plain-language sentence explaining a transaction's "
+    "fraud risk signals. You will be told the transaction's risk tier, which has "
+    "ALREADY been decided by fixed business rules relative to this system's cost-optimal "
+    "threshold — a probability can be numerically small but still correctly classified as "
+    "high risk if it exceeds this system's threshold. Your sentence must be consistent with "
+    "the given tier; never independently judge the probability as low or high based on the "
+    "raw number alone, and never contradict the given tier. Do not recommend actions here. "
+    "Do not suggest how to alter a transaction to change its score."
 )
 
 
@@ -359,7 +363,7 @@ def generate_case_note(feature_dict, fraud_prob=None, optimal_threshold=None,
 
 
 
-def generate_risk_narration(contributions, probability):
+def generate_risk_narration(contributions, probability, optimal_threshold, risk_tier):
     """
     Generate a one-sentence, always-on AI narration explaining why
     a transaction's fraud risk score is what it is.
@@ -373,6 +377,11 @@ def generate_risk_narration(contributions, probability):
     Args:
         contributions: list of dicts with feature contributions
         probability: float, the fraud probability score
+        optimal_threshold: float, the cost-optimal decision threshold
+        risk_tier: str, the already-decided tier string (e.g. "Approved" /
+            "Flagged for Review" / "Strongly Flagged") — computed
+            deterministically the same way the badge is, and passed in
+            as a given fact, not for the LLM to judge.
 
     Returns:
         str: one plain-language sentence narrating the risk signals
@@ -388,7 +397,7 @@ def generate_risk_narration(contributions, probability):
 
         api_key = os.environ.get("GROQ_API_KEY")
         if not api_key:
-            return _fallback_narration(contributions, probability)
+            return _fallback_narration(contributions, probability, risk_tier)
 
         client = Groq(api_key=api_key)
         response = client.chat.completions.create(
@@ -397,27 +406,24 @@ def generate_risk_narration(contributions, probability):
             temperature=0.3,
             messages=[
                 {"role": "system", "content": NARRATION_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Fraud probability: {probability:.2f}. Top contributing signals: {top_features}"},
+                {"role": "user", "content": (
+                    f"Fraud probability: {probability:.2f}. Cost-optimal threshold for this system: "
+                    f"{optimal_threshold:.2f}. Decided risk tier: {risk_tier}. Top contributing signals: "
+                    f"{top_features}. Write one sentence consistent with the given tier."
+                )},
             ],
         )
         return response.choices[0].message.content.strip()
 
     except Exception:
-        return _fallback_narration(contributions, probability)
+        return _fallback_narration(contributions, probability, risk_tier)
 
 
-def _fallback_narration(contributions, probability):
+def _fallback_narration(contributions, probability, risk_tier):
     """Generate a fallback narration without LLM when API is unavailable."""
-    if probability < 0.1:
-        level = "low"
-    elif probability < 0.3:
-        level = "moderate"
-    else:
-        level = "elevated"
-
     top = contributions[0] if contributions else None
     if top:
         feature_name = _humanize_feature_name(top["feature"])
-        return (f"Risk assessed as {level} — the primary signal is "
+        return (f"Tier: {risk_tier} — the primary signal is "
                 f"{feature_name} which {top['direction']}.")
-    return f"Risk assessed as {level} based on the transaction's overall signal profile."
+    return f"Tier: {risk_tier} based on the transaction's overall signal profile."

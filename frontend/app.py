@@ -140,14 +140,14 @@ st.markdown("""
         border: 1px solid #059669;
     }
     .risk-elevated {
-        background: linear-gradient(135deg, #78350f, #92400e);
-        color: #fcd34d;
-        border: 1px solid #b45309;
+        background: linear-gradient(135deg, #1e40af, #2563eb);
+        color: #bfdbfe;
+        border: 1px solid #3b82f6;
     }
     .risk-high {
-        background: linear-gradient(135deg, #7f1d1d, #991b1b);
-        color: #fca5a5;
-        border: 1px solid #dc2626;
+        background: linear-gradient(135deg, #78350f, #92400e);
+        color: #fcd34d;
+        border: 1px solid #d97706;
     }
     
     /* Action pill badge */
@@ -570,22 +570,42 @@ with tab1:
                 feature_dict, model, raw_model, encoder, config, feature_names
             )
             
-            # Determine risk level
+            # Determine risk level and decision-oriented badge label
+            above_range = 1.0 - optimal_threshold
+            decline_floor = optimal_threshold + above_range * 0.7
             if fraud_prob < optimal_threshold * 0.5:
                 risk_level = "low"
-                risk_label = "Low Risk"
+                risk_label = "Approved"
                 risk_class = "risk-low"
                 score_color = "#22c55e"
             elif fraud_prob < optimal_threshold:
                 risk_level = "elevated"
-                risk_label = "Elevated Risk"
+                risk_label = "Approved"
+                risk_class = "risk-low"
+                score_color = "#22c55e"
+            elif fraud_prob < decline_floor:
+                risk_level = "high"
+                risk_label = "Flagged for Review"
                 risk_class = "risk-elevated"
                 score_color = "#f59e0b"
             else:
                 risk_level = "high"
-                risk_label = "High Risk"
+                risk_label = "Strongly Flagged"
                 risk_class = "risk-high"
                 score_color = "#ef4444"
+            
+            # Build caption explaining the badge decision
+            if fraud_prob < optimal_threshold:
+                badge_caption = (
+                    f"Below the cost-optimal review threshold for this system "
+                    f"({optimal_threshold:.2%})."
+                )
+            else:
+                badge_caption = (
+                    f"Flagged because this exceeds the cost-optimal review threshold "
+                    f"for this system ({optimal_threshold:.2%}) \u2014 not a claim that "
+                    f"fraud is likely."
+                )
             
             # Score display
             st.markdown(f"""
@@ -595,14 +615,14 @@ with tab1:
                 <div style="margin-top: 0.8rem;">
                     <span class="risk-badge {risk_class}">{risk_label}</span>
                 </div>
-                <div style="margin-top: 0.5rem; color: #6b7280; font-size: 0.8rem;">
-                    Cost-optimal threshold: {optimal_threshold:.2%}
+                <div style="margin-top: 0.5rem; color: #9ca3af; font-size: 0.8rem; max-width: 500px; margin-left: auto; margin-right: auto;">
+                    {badge_caption}
                 </div>
             </div>
             """, unsafe_allow_html=True)
             
             # Always-on AI narration (runs for every transaction, flagged or not)
-            narration = generate_risk_narration(contributions, fraud_prob)
+            narration = generate_risk_narration(contributions, fraud_prob, optimal_threshold, risk_label)
             st.markdown(f"""
             <div class="narration-line">
                 <span class="narration-icon">🤖</span> {narration}
