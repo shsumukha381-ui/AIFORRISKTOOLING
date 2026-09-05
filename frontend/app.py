@@ -363,29 +363,8 @@ st.markdown("""
 
 
 # ---------------------------------------------------------------------------
-# Main Application Content (Protected)
+# Main Application Content
 # ---------------------------------------------------------------------------
-if not st.session_state.get('connected'):
-    st.markdown("""
-    <div style="text-align: center; margin-top: 10vh;">
-        <h1 style="font-size: 3rem; margin-bottom: 0;">🛡️ Fraud Risk Portal</h1>
-        <p style="color: #888; margin-top: 0.5rem; margin-bottom: 2rem;">Authorized Risk Analysts Only</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col2:
-        # Wrap the login button in a container to center it
-        st.markdown('<div style="display: flex; justify-content: center;">', unsafe_allow_html=True)
-        authenticator.login()
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-    st.stop()  # Stop execution until authenticated
-
-# If authenticated, show logout button in sidebar
-st.sidebar.title(f"Welcome, {st.session_state.get('user_info', {}).get('given_name', 'Analyst')}")
-if st.sidebar.button("Log Out"):
-    authenticator.logout()
 
 # ---------------------------------------------------------------------------
 # Tabs
