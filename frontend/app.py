@@ -601,7 +601,7 @@ with tab1:
                 }
                 return colors.get(val, "")
             
-            styled_summary = summary_df.style.applymap(
+            styled_summary = summary_df.style.map(
                 _color_decision, subset=["Decision"]
             )
             st.dataframe(styled_summary, use_container_width=True, hide_index=True)
