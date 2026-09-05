@@ -542,6 +542,13 @@ with tab1:
                             feature_dict = {}
                             for col in config["numeric_cols"]:
                                 val = row.get(col, config["train_medians"].get(col, 0))
+                                # Handle boolean-like strings (T/F, True/False, Y/N)
+                                if isinstance(val, str):
+                                    val_lower = val.strip().lower()
+                                    if val_lower in ('t', 'true', 'y', 'yes', '1'):
+                                        val = 1.0
+                                    elif val_lower in ('f', 'false', 'n', 'no', '0'):
+                                        val = 0.0
                                 feature_dict[col] = float(val) if pd.notna(val) else config["train_medians"].get(col, 0)
                             for col in config["categorical_cols"]:
                                 val = row.get(col, "missing")
