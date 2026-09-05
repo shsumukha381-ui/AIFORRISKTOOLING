@@ -43,37 +43,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ---------------------------------------------------------------------------
-# Authentication Setup
-# ---------------------------------------------------------------------------
-from streamlit_google_auth import Authenticate
-
-# Dynamically build the google credentials JSON file from environment variables
-google_creds = {
-    "web": {
-        "client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
-        "project_id": "fraud-detector-auth",
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
-        "redirect_uris": [os.environ.get("GOOGLE_REDIRECT_URI", "http://localhost:8501")]
-    }
-}
-creds_path = os.path.join(PROJECT_ROOT, "google_credentials.json")
-with open(creds_path, "w") as f:
-    json.dump(google_creds, f)
-
-authenticator = Authenticate(
-    secret_credentials_path=creds_path,
-    cookie_name='fraud_detector_cookie',
-    cookie_key='secure_signature_key',
-    redirect_uri=os.environ.get("GOOGLE_REDIRECT_URI", "http://localhost:8501"),
-    cookie_expiry_days=30.0
-)
-
-authenticator.check_authentification()
-
 
 # ---------------------------------------------------------------------------
 # Custom CSS — dark theme + gradient banner + styling
