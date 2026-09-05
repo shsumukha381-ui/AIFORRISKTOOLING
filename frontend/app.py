@@ -622,12 +622,22 @@ with tab1:
             """, unsafe_allow_html=True)
             
             # Always-on AI narration (runs for every transaction, flagged or not)
-            narration = generate_risk_narration(contributions, fraud_prob, optimal_threshold, risk_label)
-            st.markdown(f"""
-            <div class="narration-line">
-                <span class="narration-icon">🤖</span> {narration}
-            </div>
-            """, unsafe_allow_html=True)
+            try:
+                narration = generate_risk_narration(
+                    contributions, float(fraud_prob), float(optimal_threshold), risk_label
+                )
+            except Exception as e:
+                narration = None
+                print(f"[app] Narration generation failed: {e}")
+
+            if narration:
+                st.markdown(f"""
+                <div class="narration-line">
+                    <span class="narration-icon">🤖</span> {narration}
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.caption("🤖 AI narration unavailable for this transaction.")
             
             # Top contributing features
             st.markdown('<p class="section-header">Top Contributing Signals</p>', unsafe_allow_html=True)
