@@ -31,7 +31,6 @@ from backend.responder import (
     generate_case_note,
     generate_risk_narration,
     prepare_feature_vector,
-    get_feature_contributions,
 )
 from backend.feature_glossary import lookup_feature
 
@@ -667,6 +666,7 @@ with tab1:
             narration_cache = st.session_state["csv_narration_cache"]
             
             # Compute feature contributions for selected row (needed for narration + display)
+            from backend.responder import get_feature_contributions
             X_sel = prepare_feature_vector(sel_feature_dict, config, encoder)
             contributions = get_feature_contributions(raw_model, X_sel, feature_names)
             
