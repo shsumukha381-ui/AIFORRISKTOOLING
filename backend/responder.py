@@ -187,6 +187,78 @@ def predict_fraud_probability(feature_dict, model=None, raw_model=None,
     return float(prob), contributions, X
 
 
+def predict_fraud_probability_batch(df, model, raw_model, encoder, config,
+                                     feature_names, optimal_threshold):
+    """
+    Score every row in *df* in a single batch call.
+
+    Returns a list of dicts, one per row:
+        {row_idx, fraud_prob, risk_tier, risk_class, score_color, feature_dict}
+
+    Feature contributions are NOT computed here (expensive per-row SHAP);
+    they are generated on demand when a user selects a specific row.
+    """
+    numeric_cols = config["numeric_cols"]
+    categorical_cols = config["categorical_cols"]
+    medians = config["train_medians"]
+
+    above_range = 1.0 - optimal_threshold
+    decline_floor = optimal_threshold + above_range * 0.7
+
+    results = []
+    X_all_parts = []
+
+    for row_idx in range(len(df)):
+        row = df.iloc[row_idx]
+        # Build feature dict for this row (same logic as single-row CSV path)
+        feature_dict = {}
+        for col in numeric_cols:
+            val = row.get(col, medians.get(col, 0))
+            if isinstance(val, str):
+                vl = val.strip().lower()
+                if vl in ('t', 'true', 'y', 'yes', '1'):
+                    val = 1.0
+                elif vl in ('f', 'false', 'n', 'no', '0'):
+                    val = 0.0
+            feature_dict[col] = float(val) if pd.notna(val) else medians.get(col, 0)
+        for col in categorical_cols:
+            val = row.get(col, "missing")
+            feature_dict[col] = str(val) if pd.notna(val) else "missing"
+
+        X = prepare_feature_vector(feature_dict, config, encoder)
+        X_all_parts.append(X)
+        results.append({"row_idx": row_idx, "feature_dict": feature_dict})
+
+    # Stack into a single matrix and score in one call
+    X_batch = np.vstack(X_all_parts)
+    probs = model.predict_proba(X_batch)[:, 1]
+
+    for i, prob in enumerate(probs):
+        p = float(prob)
+        # Deterministic tier — same logic as the single-row path
+        if p < optimal_threshold:
+            tier = "Approved"
+            cls = "risk-low"
+            color = "#22c55e"
+        elif p < decline_floor:
+            tier = "Flagged for Review"
+            cls = "risk-elevated"
+            color = "#f59e0b"
+        else:
+            tier = "Strongly Flagged"
+            cls = "risk-high"
+            color = "#ef4444"
+
+        results[i].update({
+            "fraud_prob": p,
+            "risk_tier": tier,
+            "risk_class": cls,
+            "score_color": color,
+        })
+
+    return results
+
+
 def _build_user_prompt(fraud_prob, optimal_threshold, contributions,
                        transaction_amt, product_cd, decided_action):
     """Build the user message for the LLM with all relevant context."""

@@ -27,9 +27,11 @@ load_dotenv()
 from backend.responder import (
     load_model_artifacts,
     predict_fraud_probability,
+    predict_fraud_probability_batch,
     generate_case_note,
     generate_risk_narration,
     prepare_feature_vector,
+    get_feature_contributions,
 )
 from backend.feature_glossary import lookup_feature
 
@@ -509,10 +511,10 @@ with tab1:
             st.session_state.chat_history = []
             st.session_state.tx_context = None
     
-    # ----- Upload CSV Row -----
+    # ----- Upload CSV -----
     elif input_method == "Upload CSV row":
         uploaded_file = st.file_uploader(
-            "Upload a CSV file with a single transaction row",
+            "Upload a CSV file with one or more transaction rows",
             type=["csv"],
             key="csv_upload"
         )
@@ -532,36 +534,242 @@ with tab1:
                         st.error(f"Missing required columns: {', '.join(sorted(missing_cols))}")
                         st.info(f"Expected columns: {', '.join(sorted(required_cols))}")
                     else:
-                        if len(df_upload) > 1:
-                            st.warning("Multiple rows detected — analyzing only the first row.")
+                        st.success(f"CSV validated — {len(df_upload)} transaction(s) found.")
                         
-                        st.success("CSV validated successfully!")
-                        row = df_upload.iloc[0]
-                        
-                        if st.button("🛡️ Check Risk Before Payment", key="csv_analyze", use_container_width=True):
-                            feature_dict = {}
-                            for col in config["numeric_cols"]:
-                                val = row.get(col, config["train_medians"].get(col, 0))
-                                # Handle boolean-like strings (T/F, True/False, Y/N)
-                                if isinstance(val, str):
-                                    val_lower = val.strip().lower()
-                                    if val_lower in ('t', 'true', 'y', 'yes', '1'):
-                                        val = 1.0
-                                    elif val_lower in ('f', 'false', 'n', 'no', '0'):
-                                        val = 0.0
-                                feature_dict[col] = float(val) if pd.notna(val) else config["train_medians"].get(col, 0)
-                            for col in config["categorical_cols"]:
-                                val = row.get(col, "missing")
-                                feature_dict[col] = str(val) if pd.notna(val) else "missing"
-                                
-                            st.session_state.current_feature_dict = feature_dict
+                        if st.button("🛡️ Score All Transactions", key="csv_analyze", use_container_width=True):
+                            with st.spinner(f"Scoring {len(df_upload)} transactions..."):
+                                batch_results = predict_fraud_probability_batch(
+                                    df_upload, model, raw_model, encoder, config,
+                                    feature_names, optimal_threshold,
+                                )
+                            st.session_state["csv_batch_results"] = batch_results
+                            st.session_state["csv_batch_df"] = df_upload
+                            # Clear per-row LLM caches from a previous upload
+                            st.session_state.pop("csv_narration_cache", None)
+                            st.session_state.pop("csv_casenote_cache", None)
+                            st.session_state.current_feature_dict = None
                             st.session_state.chat_history = []
                             st.session_state.tx_context = None
             except Exception as e:
                 st.error(f"Error reading CSV: {str(e)}")
+        
+        # --- CSV Batch Results Panel ---
+        if "csv_batch_results" in st.session_state and input_method == "Upload CSV row":
+            batch_results = st.session_state["csv_batch_results"]
+            st.markdown("---")
+            
+            n_total = len(batch_results)
+            n_flagged = sum(1 for r in batch_results if r["risk_tier"] != "Approved")
+            
+            col_s1, col_s2 = st.columns(2)
+            with col_s1:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="label">Transactions Scored</div>
+                    <div class="value">{n_total}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with col_s2:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="label">Flagged for Review</div>
+                    <div class="value" style="color: #f59e0b;">{n_flagged}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Build summary table
+            summary_rows = []
+            for r in batch_results:
+                fd = r["feature_dict"]
+                summary_rows.append({
+                    "Row": r["row_idx"] + 1,
+                    "Transaction Amt": fd.get("TransactionAmt", 0),
+                    "Product": fd.get("ProductCD", "—"),
+                    "Fraud Probability": round(r["fraud_prob"], 4),
+                    "Decision": r["risk_tier"],
+                })
+            summary_df = pd.DataFrame(summary_rows).sort_values(
+                "Fraud Probability", ascending=False
+            )
+            
+            def _color_decision(val):
+                colors = {
+                    "Approved": "color: #22c55e",
+                    "Flagged for Review": "color: #f59e0b; font-weight: 600",
+                    "Strongly Flagged": "color: #ef4444; font-weight: 600",
+                }
+                return colors.get(val, "")
+            
+            styled_summary = summary_df.style.applymap(
+                _color_decision, subset=["Decision"]
+            )
+            st.dataframe(styled_summary, use_container_width=True, hide_index=True)
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.info(
+                f"{n_total} transactions loaded and scored. "
+                f"Select a row below to see the full AI explanation."
+            )
+            
+            # Row selector for detail view
+            row_options = [
+                f"Row {r['row_idx']+1} — {r['fraud_prob']:.2%} — {r['risk_tier']}"
+                for r in sorted(batch_results, key=lambda x: -x["fraud_prob"])
+            ]
+            sorted_results = sorted(batch_results, key=lambda x: -x["fraud_prob"])
+            
+            selected_row_label = st.selectbox(
+                "View details for row:",
+                options=row_options,
+                key="csv_row_select",
+            )
+            selected_idx = row_options.index(selected_row_label)
+            selected_result = sorted_results[selected_idx]
+            sel_row_idx = selected_result["row_idx"]
+            sel_feature_dict = selected_result["feature_dict"]
+            sel_prob = selected_result["fraud_prob"]
+            sel_tier = selected_result["risk_tier"]
+            sel_class = selected_result["risk_class"]
+            sel_color = selected_result["score_color"]
+            
+            # Badge caption
+            if sel_prob < optimal_threshold:
+                sel_caption = (
+                    f"Below the cost-optimal review threshold for this system "
+                    f"({optimal_threshold:.2%})."
+                )
+            else:
+                sel_caption = (
+                    f"Flagged because this exceeds the cost-optimal review threshold "
+                    f"for this system ({optimal_threshold:.2%}) \u2014 not a claim that "
+                    f"fraud is likely."
+                )
+            
+            # Score display for selected row
+            st.markdown(f"""
+            <div class="score-display">
+                <div class="score-value" style="color: {sel_color};">{sel_prob:.1%}</div>
+                <div class="score-label">Fraud Probability — Row {sel_row_idx+1}</div>
+                <div style="margin-top: 0.8rem;">
+                    <span class="risk-badge {sel_class}">{sel_tier}</span>
+                </div>
+                <div style="margin-top: 0.5rem; color: #9ca3af; font-size: 0.8rem; max-width: 500px; margin-left: auto; margin-right: auto;">
+                    {sel_caption}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # --- On-demand LLM narration (cached per row) ---
+            if "csv_narration_cache" not in st.session_state:
+                st.session_state["csv_narration_cache"] = {}
+            narration_cache = st.session_state["csv_narration_cache"]
+            
+            # Compute feature contributions for selected row (needed for narration + display)
+            X_sel = prepare_feature_vector(sel_feature_dict, config, encoder)
+            contributions = get_feature_contributions(raw_model, X_sel, feature_names)
+            
+            if sel_row_idx not in narration_cache:
+                try:
+                    narration = generate_risk_narration(
+                        contributions, float(sel_prob), float(optimal_threshold), sel_tier
+                    )
+                except Exception as e:
+                    narration = None
+                    print(f"[app] Narration generation failed for row {sel_row_idx+1}: {e}")
+                narration_cache[sel_row_idx] = narration
+            else:
+                narration = narration_cache[sel_row_idx]
+            
+            if narration:
+                st.markdown(f"""
+                <div class="narration-line">
+                    <span class="narration-icon">🤖</span> {narration}
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.caption("🤖 AI narration unavailable for this transaction.")
+            
+            # Top contributing features
+            st.markdown('<p class="section-header">Top Contributing Signals</p>', unsafe_allow_html=True)
+            import html as html_mod
+            contrib_html = '<table class="contrib-table"><tr><th>Feature</th><th>Value</th><th>Impact</th><th>Description</th></tr>'
+            for c in contributions:
+                direction_icon = "🔴 ↑" if c["contribution"] > 0 else "🟢 ↓"
+                desc = lookup_feature(c["feature"]) or "—"
+                desc_escaped = html_mod.escape(desc)
+                contrib_html += f'<tr><td>{c["feature"]}</td><td>{c["value"]:.2f}</td><td>{direction_icon} {c["direction"]}</td><td style="font-size:0.82rem;color:#a0a0b8;max-width:300px;">{desc_escaped}</td></tr>'
+            contrib_html += '</table>'
+            st.markdown(contrib_html, unsafe_allow_html=True)
+            
+            # Case note (only for flagged transactions, cached per row)
+            if sel_prob >= optimal_threshold:
+                if "csv_casenote_cache" not in st.session_state:
+                    st.session_state["csv_casenote_cache"] = {}
+                casenote_cache = st.session_state["csv_casenote_cache"]
+                
+                if sel_row_idx not in casenote_cache:
+                    st.markdown('<p class="section-header">AI Case Note</p>', unsafe_allow_html=True)
+                    try:
+                        cn_result = generate_case_note(
+                            sel_feature_dict,
+                            fraud_prob=sel_prob,
+                            optimal_threshold=optimal_threshold,
+                            model=model,
+                            raw_model=raw_model,
+                            encoder=encoder,
+                            config=config,
+                            feature_names=feature_names,
+                            eval_summary=eval_summary,
+                        )
+                    except Exception as e:
+                        cn_result = {"case_note": f"[Case note generation failed: {e}]",
+                                     "recommended_action": "Hold — pending manual review"}
+                        print(f"[app] Case note failed for row {sel_row_idx+1}: {e}")
+                    casenote_cache[sel_row_idx] = cn_result
+                else:
+                    st.markdown('<p class="section-header">AI Case Note</p>', unsafe_allow_html=True)
+                    cn_result = casenote_cache[sel_row_idx]
+                
+                action = cn_result.get("recommended_action", "Hold — do not capture payment yet, pending manual review")
+                if "decline" in action.lower():
+                    action_class = "action-decline"
+                elif "step-up" in action.lower():
+                    action_class = "action-stepup"
+                else:
+                    action_class = "action-review"
+                
+                st.markdown(f"""
+                <div class="case-note-card">
+                    <h4>🤖 Generated Case Note</h4>
+                    <p>{cn_result.get('case_note', 'Case note unavailable.')}</p>
+                    <div style="margin-top: 0.8rem;">
+                        <span style="color: #6b7280; font-size: 0.8rem; margin-right: 0.5rem;">Recommended Action:</span>
+                        <span class="action-pill {action_class}">{action}</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div class="no-action-card">
+                    <p>✅ Approved — proceed with payment.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Update transaction context for the chatbot
+            action_for_chat = "Approved"
+            if sel_prob >= optimal_threshold:
+                action_for_chat = cn_result.get("recommended_action", "Hold") if sel_prob >= optimal_threshold else "Approved"
+            
+            st.session_state.tx_context = {
+                "probability": float(sel_prob),
+                "decided_action": action_for_chat,
+                "top_features": "; ".join(f"{c['feature']}={c['value']} ({c['direction']})" for c in contributions[:5])
+            }
     
-    # ----- Result Panel -----
-    if feature_dict is not None:
+    # ----- Single-Row Result Panel (Manual entry / Pre-loaded demo) -----
+    if feature_dict is not None and input_method != "Upload CSV row":
         st.markdown("---")
         
         with st.spinner("Analyzing transaction..."):
