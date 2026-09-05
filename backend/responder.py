@@ -31,15 +31,32 @@ import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 
-# Import CalibratedModel so pickle can resolve it when loading xgb_model.pkl
-# (the model was pickled when train_model.py was __main__, so pickle stored
-# the class reference as __main__.CalibratedModel).
-from backend.train_model import CalibratedModel  # noqa: F401
+# Define CalibratedModel locally so we don't need to import from
+# train_model.py (which pulls in xgboost / sklearn and can fail on
+# Streamlit Cloud).  This class must match the one in train_model.py.
+class CalibratedModel:
+    """Lightweight wrapper: raw XGBoost + isotonic calibrator."""
+
+    def __init__(self, estimator, calibrator):
+        self.estimator = estimator
+        self.calibrator = calibrator
+
+    def predict_proba(self, X):
+        """Return calibrated [P(legit), P(fraud)] array."""
+        raw = self.estimator.predict_proba(X)[:, 1]
+        calibrated = self.calibrator.predict(raw)
+        return np.column_stack([1.0 - calibrated, calibrated])
 
 # Patch into __main__ so pickle.load can find __main__.CalibratedModel
 import __main__ as _main_module
 if not hasattr(_main_module, "CalibratedModel"):
     _main_module.CalibratedModel = CalibratedModel
+
+class CustomUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if name == 'CalibratedModel':
+            return CalibratedModel
+        return super().find_class(module, name)
 
 # Load .env file for API key
 load_dotenv()
@@ -66,12 +83,6 @@ NARRATION_SYSTEM_PROMPT = (
 )
 
 
-class CustomUnpickler(pickle.Unpickler):
-    def find_class(self, module, name):
-        if name == 'CalibratedModel':
-            from backend.train_model import CalibratedModel
-            return CalibratedModel
-        return super().find_class(module, name)
 
 def load_model_artifacts():
     """Load the trained (calibrated) XGBoost model, raw model, encoder, and feature names."""
